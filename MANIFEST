@@ -1,0 +1,21 @@
+Changes
+MANIFEST			This list of files
+Makefile.PL
+README
+SMARTS.pm
+smartest.pl
+t/1.pat
+t/2.pat
+t/SMARTS.t
+t/btatom.pat
+t/btbond.pat
+t/c.pat
+t/c_c.pat
+t/noatom.pat
+t/nobond.pat
+t/noring.pat
+t/noring2.pat
+t/noring3.pat
+t/pod.t
+t/ring.pat
+t/stack.pat
