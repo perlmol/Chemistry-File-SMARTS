@@ -25,6 +25,7 @@ t/pats/c_c.pat
 t/pats/charge_num.pat
 t/pats/class.pat
 t/pats/connections.pat
+t/pats/consecutive_branches.pat
 t/pats/disconnected.pat
 t/pats/double_charge.pat
 t/pats/explicit_connection.pat

@@ -1,4 +1,7 @@
 Revision history for Perl extension Chemistry::File::SMARTS.
 
+0.11  Jun 31 2004
+    - Fixed tokenizing bug for consecutive branches.
+
 0.10  Jun 17 2004
     - First release

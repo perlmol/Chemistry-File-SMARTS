@@ -1,6 +1,6 @@
 package Chemistry::File::SMARTS;
 
-$VERSION = "0.10";
+$VERSION = "0.11";
 # $Id$
 
 use 5.006;
@@ -9,7 +9,7 @@ use warnings;
 use Chemistry::Pattern;
 use base "Chemistry::File";
 use Carp;
-#use Data::Dumper;
+use Data::Dumper;
 use List::Util 'sum';
 
 =head1 NAME
@@ -319,7 +319,7 @@ sub tokenize {
                 $state = 4, redo;
             }
         } elsif ($state == 4) {  # expect atom or bond or branch
-            push(@toks, $char), $state = 2, next if ($char =~ /[()]/); # branch
+            push(@toks, $char), next if ($char =~ /[()]/); # branch
             $state = 2, redo; # bond
         } elsif ($state == 5) {  # expect left paren
             croak "expected (" unless $char eq '(';
@@ -342,7 +342,7 @@ sub tokenize {
             die "shouldn't be here";
         }
     }
-    #print Dumper \@toks if $DEBUG;
+    print Dumper \@toks if $DEBUG;
     \@toks;
 }
 
@@ -368,7 +368,7 @@ reasonable it will interpret it in a strange way without warning.
 
 =head1 VERSION
 
-0.10
+0.11
 
 =head1 SEE ALSO
 

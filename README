@@ -1,4 +1,4 @@
-Chemistry::File::SMARTS version 0.10
+Chemistry::File::SMARTS version 0.11
 ====================================
 
 This object-oriented module is used for reading SMARTS patterns, returning
@@ -6,6 +6,9 @@ Chemistry::Pattern objects.
 
 For more information about SMARTS, see the SMARTS Theory Manual at
 http://www.daylight.com/dayhtml/doc/theory/theory.smarts.html
+
+CHANGES SINCE VERSION 0.10
+    - Fixed tokenizing bug for consecutive branches.
 
 INSTALLATION
 
