@@ -5,13 +5,14 @@ use strict;
 use warnings;
 use Chemistry::File::SMARTS;
 use Chemistry::File::SMILES;
+use Chemistry::Ring 'aromatize_mol';
 
-our $debug ||= 0;
+our ($debug, $debug_pattern);
 our $permute ||= 0;
 our $overlap ||= 1;
 
 $Chemistry::File::SMARTS::DEBUG = $debug;
-$Chemistry::Pattern::Debug = $debug;
+$Chemistry::Pattern::DEBUG = $debug_pattern;
 
 my $smarts = $ARGV[0] || 'C(OC)C';
 my %options = (permute => $permute, overlap => $overlap);
@@ -28,8 +29,13 @@ $patt->options(%options);
 
 # Test matching on a smiles molecule
 my $smiles = $ARGV[1] || "COCC";
-print "Mol: $smiles\n";
 my $mol = Chemistry::Mol->parse($smiles, format => 'smiles');
+print "Mol: $smiles\n";
+my $asmiles = $mol->print(format => 'smiles', aromatic => 1);
+my $ksmiles = $mol->print(format => 'smiles');
+#print "AMol: $asmiles\n";
+#print "KMol: $ksmiles\n";
+aromatize_mol($mol);
 
 my @ret;
 while ($patt->match($mol) ) {

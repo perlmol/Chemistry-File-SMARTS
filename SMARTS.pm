@@ -1,6 +1,7 @@
 package Chemistry::File::SMARTS;
 
-$VERSION = "0.01";
+$VERSION = "0.10";
+# $Id$
 
 use 5.006;
 use strict;
@@ -10,7 +11,54 @@ use base "Chemistry::File";
 use Carp;
 #use Data::Dumper;
 use List::Util 'sum';
-#use Text::Balanced qw(extract_multiple extract_bracketed);
+
+=head1 NAME
+
+Chemistry::File::SMARTS - SMARTS chemical substructure pattern linear notation parser
+
+=head1 SYNOPSYS
+
+    #!/usr/bin/perl
+    use Chemistry::File::SMARTS;
+
+    # this string matches an oxygen next to an atom with three 
+    # neighbors, one of which is a hydrogen, and a positive charge
+    my $smarts = 'O[D3H+]'; 
+
+    # parse a SMARTS string and compile it into a
+    # Chemistry::Pattern object
+    my $patt = Chemistry::Pattern->parse("$smarts", format => 'smarts');
+
+    # find matches of the pattern in a Chemistry::Mol object $mol
+    my $mol = Chemistry::Mol->read("myfile.mol");
+    while ($patt->match($mol)) {
+        print "pattern matches atoms: ", $patt->atom_map, "\n"
+    }
+
+    # NOTE: if the SMARTS pattern relies on aromaticity 
+    # properties, you have to make sure that the target 
+    # molecule is "aromatized" first:
+    my $smarts = 'c:a';
+    my $patt = Chemistry::Pattern->parse("$smarts", format => 'smarts');
+    use Chemistry::Ring 'aromatize_mol';
+    aromatize_mol($mol);  # <--- AROMATIZE!!!
+    while ($patt->match($mol)) {
+        print "pattern matches atoms: ", $patt->atom_map, "\n"
+    }
+
+=head1 DESCRIPTION
+
+This module parse a SMARTS string, generating a L<Chemistry::Pattern> object.
+It is a file I/O driver for the PerlMol toolkit; it's not called directly but
+by means of the Chemistry::Pattern->parse class method.
+
+For a detailed description of the SMARTS language, see
+L<http://www.daylight.com/dayhtml/doc/theory/theory.smarts.html>. Note that
+this module doesn't implement the full language, as detailed under CAVEATS.
+
+This module is part of the PerlMol project, L<http://www.perlmol.org/>.
+
+=cut
 
 # Initialization
 Chemistry::Mol->register_format(smarts => __PACKAGE__);
@@ -19,28 +67,33 @@ our $DEBUG = 0;
 # Chemistry::File interface
 
 sub parse_string {
-    my ($self, $s, %options) = @_;
-    my $patt = parse_smarts($s);
+    my ($self, $s, %opts) = @_;
+    my $patt = parse_smarts($s, \%opts);
     $patt;
 }
 
+
+############## SMARTS PARSER ##############
+
 sub parse_smarts {
-    my ($s) = @_;
+    my ($s, $opts) = @_;
     my %digits;
 
-    my @toks = tokenize($s);
-    my $tok = shift(@toks);
-    my $patt = Chemistry::Pattern->new();
+    my $toks = tokenize($s);
+    my $tok = shift(@$toks);
+    print "tok: $tok\n" if $DEBUG;
+    my $mol_class = $opts->{mol_class} || "Chemistry::Pattern";
+    my $patt = $mol_class->new();
     my @atom_stack;
-    my $current_atom = parse_atom($patt, $tok);
-    while (defined ($tok = shift @toks)) {
+    my $current_atom = parse_atom($patt, $tok, $toks);
+    while (defined ($tok = shift @$toks)) {
         print "tok: $tok\n" if $DEBUG;
         if ($tok eq '(') {
             push @atom_stack, $current_atom;
         } elsif ($tok eq ')') {
             $current_atom = pop @atom_stack;
         } else {  # bond, atom
-            my $next_tok = shift @toks;
+            my $next_tok = shift @$toks;
             if ($next_tok =~ /^\d+$/) {  # digit
                 if ($digits{$next_tok}) {  # close ring
                     parse_bond($patt, $tok, $current_atom, 
@@ -50,7 +103,7 @@ sub parse_smarts {
                     $digits{$next_tok} = $current_atom;
                 }
             } else {
-                my $next_atom = parse_atom($patt, $next_tok);
+                my $next_atom = parse_atom($patt, $next_tok, $toks);
                 parse_bond($patt, $tok, $current_atom, $next_atom);
                 $current_atom = $next_atom;
             }
@@ -64,7 +117,7 @@ sub parse_atom {
     
     my $expr = 
         join " and ", map { 
-            join " or ", map { 
+            join " || ", map { 
                 join ' && ', map {
                     parse_atomic_primitive($_);
                 } split '&', $_;
@@ -74,11 +127,12 @@ sub parse_atom {
     print "atom expr: $expr\n" if $DEBUG;
     my $sub = eval <<SUB;
         sub {
+            no warnings;
             my (\$patt, \$atom) = \@_;
             $expr;
         };
 SUB
-    my $atom = Chemistry::Pattern::Atom->new(test_sub => $sub);
+    my $atom = $patt->atom_class->new(test_sub => $sub);
     $patt->add_atom($atom);
     $atom;
 }
@@ -89,48 +143,75 @@ sub parse_atomic_primitive {
     local ($_) = @_;
     my @terms;
     no warnings 'uninitialized';
+
+    s/^(!?)H// &&           # Hydrogen atom
+        push @terms, "$1(\$atom->symbol eq 'H')";
+
     s/(!?)\*// &&           # wildcard
         push @terms, "${1}1";
+
     s/(!?)D(\d?)// &&       # explicit connections (shouldn't count h)
-        push @terms, "$1(\$atom->bonds == " . (defined $2 ? $2 : 1) . ')';
+        push @terms, "$1(\$atom->bonds == " . (length $2 ? $2 : 1) . ')';
+
     s/(!?)a// &&            # aromatic
         push @terms, "$1\$atom->aromatic";
+
     s/(!?)A// &&            # aliphatic
         push @terms, "$1(!\$atom->aromatic)";
+
     s/(!?)X(\d?)// &&       # total connections (should add implicit H)
-        push @terms, "$1(\$atom->bonds == " . (defined $2 ? $2 : 1) . ')';
+        push @terms, "$1(\$atom->bonds + \$atom->hydrogens == " 
+            . (length $2 ? $2 : 1) . ')';
+
     s/(!?)v(\d?)// &&       # valence
-        push @terms, "$1(sum(map {\$_->order} \$atom->bonds) == " 
-            . (defined $2 ? $2 : 1) . ')';
-    s/(!?)[Hh](\d?)// &&    # H-count
-        push @terms, "$1(sum(map {\$_->symbol eq 'H'} \$atom->neighbors) == " 
-            . (defined $2 ? $2 : 1) . ')';
+        push @terms, "$1(\$atom->valence == " 
+            . (length $2 ? $2 : 1) . ')';
+
+    s/(!?)H(\d?)// &&    # total H-count
+        push @terms, "$1(sum(map {\$_->symbol eq 'H'} \$atom->neighbors) +
+            \$atom->hydrogens == " . (length $2 ? $2 : 1) . ')';
+
+    s/(!?)h(\d?)// &&    # implicit H-count
+        push @terms, "$1(\$atom->hydrogens == " . (length $2 ? $2 : 1) . ')';
+
     s/(!?)#(\d+)// &&       # atomic number
         push @terms, "$1(\$atom->Z == $2)";
+
     s/(!?)([+-]\d+)// &&    # numerical charge 
         push @terms, "$1(\$atom->formal_charge == $2)";
+
     s/(!?)(\++)// &&        # positive charge
-        push @terms, "$1(\$atom->formal_charge == " . length $2 . ')';
+        push @terms, "$1(\$atom->formal_charge == " . length($2) . ')';
+
     s/(!?)(-+)// &&         # negative charge 
-        push @terms, "$1(\$atom->formal_charge == -" . length $2 . ')';
+        push @terms, "$1(\$atom->formal_charge == -" . length($2) . ')';
+
     s/(!?)(\d+)// &&        # mass
         push @terms, "$1(\$atom->mass == $2)";
+
     s/(!?)([cnosp])// &&    # aromatic symbol
-        push @terms, "$1(\$atom->symbol eq '$2' && \$atom->aromatic)";
+        push @terms, "$1(\$atom->symbol eq '@{[uc $2]}' && \$atom->aromatic)";
+
     s/(!?)([A-Z][a-z]?)// &&    # aliphatic symbol
         push @terms, "$1(\$atom->symbol eq '$2' && ! \$atom->aromatic)";
+
+    #s/(!?)\$// &&    #  recursive SMARTS
+        #push @terms, qq{$1(\$patt->attr("smarts/rec0")->match(\$atom))};
+
     join ' && ', @terms;
 }
 
 sub parse_bond {
     my ($patt, $s, @atoms) = @_;
 
+    return if $s eq '.'; # the disconnected non-bond
+
     my $expr;
-    
+
     if ($s) {
         $expr = 
             join " and ", map { 
-                join " or ", map { 
+                join " || ", map { 
                     join ' && ', map {
                         parse_bond_primitive($_);
                     } split '&', $_;
@@ -143,11 +224,12 @@ sub parse_bond {
     print "bond expr: $expr\n" if $DEBUG;
     my $sub = eval <<SUB;
         sub {
+            no warnings;
             my (\$patt, \$bond) = \@_;
             $expr;
         };
 SUB
-    my $bond = Chemistry::Pattern::Bond->new(test_sub => $sub, 
+    my $bond = $patt->bond_class->new(test_sub => $sub, 
         atoms => \@atoms);
     $patt->add_bond($bond);
     $bond;
@@ -156,16 +238,22 @@ SUB
 sub parse_bond_primitive {
     local ($_) = @_;
     my @terms;
+
     s/(!?)~// &&        # wildcard
         push @terms, "${1}1";
+
     s/(!?)-// &&        # single
-        push @terms, "$1(\$bond->order == 1)";
+        push @terms, "$1(\$bond->order == 1 && !\$bond->aromatic)";
+
     s/(!?)=// &&        # double
         push @terms, "$1(\$bond->order == 2)";
+
     s/(!?)#// &&        # triple
         push @terms, "$1(\$bond->order == 3)";
+
     s/(!?):// &&        # triple
         push @terms, "$1\$bond->aromatic";
+
     join ' && ', @terms;
 }
 
@@ -207,7 +295,7 @@ sub tokenize {
             $state = 5 if ($char eq '$'); # recursive smarts
             next;
         } elsif ($state == 2) { # expect bond
-            if ($char =~ /[-=:~\\\/#@?,;&]/) {
+            if ($char =~ /[-=:~\\\/#@?,;&.!]/) {
                 $bond .= $char;
                 next;
             } else {
@@ -238,6 +326,7 @@ sub tokenize {
             $rec_smart = '';
             $paren_depth++, $state = 6, next;
         } elsif ($state == 6) {  # within recursive smarts
+            croak "Recursive SMARTS not implemented yet\n";
             $paren_depth++ if $char eq '(';
             $paren_depth-- if $char eq ')';
             unless ($paren_depth) {
@@ -254,35 +343,49 @@ sub tokenize {
         }
     }
     #print Dumper \@toks if $DEBUG;
-    @toks;
+    \@toks;
 }
 
-
-package Chemistry::File::SMARTS::simple_atom;
-
-sub parse {
-    my ($s) = shift;
-    # should do some validation here...
-    Chemistry::Pattern::Atom->new(symbol => $s);
-}
 
 1;
 
-=head1 BUGS
+=head1 CAVEATS
+
+The following features are not implemented yet:
+
+=over
+
+=item ring membership: R, r
+
+=item chirality: @, @@
+
+=item recursive SMARTS: $
+
+=back
+
+The parser is very lenient, but if you give it something that's not quite
+reasonable it will interpret it in a strange way without warning.
+
+=head1 VERSION
+
+0.10
 
 =head1 SEE ALSO
+
+L<Chemistry::Pattern>, L<Chemistry::Mol>, L<Chemistry::File>,
+L<Chemistry::File::SMILES>.
 
 For more information about SMARTS, see the SMARTS Theory Manual at
 http://www.daylight.com/dayhtml/doc/theory/theory.smarts.html
 
 =head1 AUTHOR
 
-Ivan Tubert E<lt>itub@cpan.orgE<gt>
+Ivan Tubert-Brohman E<lt>itub@cpan.orgE<gt>
 
 =head1 COPYRIGHT
 
-Copyright (c) 2003 Ivan Tubert. All rights reserved. This program is free
-software; you can redistribute it and/or modify it under the same terms as
+Copyright (c) 2004 Ivan Tubert-Brohman. All rights reserved. This program is
+free software; you can redistribute it and/or modify it under the same terms as
 Perl itself.
 
 =cut

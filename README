@@ -1,4 +1,4 @@
-Chemistry::File::SMARTS version 0.01
+Chemistry::File::SMARTS version 0.10
 ====================================
 
 This object-oriented module is used for reading SMARTS patterns, returning
@@ -6,9 +6,6 @@ Chemistry::Pattern objects.
 
 For more information about SMARTS, see the SMARTS Theory Manual at
 http://www.daylight.com/dayhtml/doc/theory/theory.smarts.html
-
-This module is under development and doesn't implement the full SMARTS syntax
-yet.
 
 INSTALLATION
 
@@ -22,15 +19,18 @@ To install this module type the following:
 DEPENDENCIES
 
 This module requires these other modules and libraries:
-    - Chemistry::Mol
-    - Chemistry::Pattern
-    - Text::Balanced
-    - Parse::RecDescent
+        Chemistry::Mol          0.24
+        Chemistry::Pattern      0.21
+        List::Util              0
+        Test::More              0
 
+To really run the tests, you need these modules as well:
+        Chemistry::Ring         0.11
+        Chemistry::File::SMILES 0.40
 
-COPYRIGHT AND LICENCE
+COPYRIGHT AND LICENSE
 
-Copyright (C) 2003 Ivan Tubert
+Copyright (C) 2004 Ivan Tubert-Brohman
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself. 

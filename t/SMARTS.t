@@ -1,15 +1,17 @@
 use Test::More;
-use Chemistry::File::SMILES;
-use Chemistry::Mol;
-use Chemistry::Pattern;
+use Chemistry::Mol 0.24;
+use Chemistry::Pattern 0.21;
 use strict;
 
 my @files;
 
 BEGIN { 
-    @files = glob "t/*.pat";
+    eval qq{ 
+        use Chemistry::Ring 0.11 'aromatize_mol';
+        use Chemistry::File::SMILES 0.40;
+    };
+    @files = glob "t/pats/*.pat" unless $@;
     plan tests => 1 + @files;
-
     use_ok('Chemistry::File::SMARTS');
 };
 
@@ -22,6 +24,7 @@ for my $file (@files) {
     Chemistry::Atom->reset_id;
     $patt = Chemistry::Pattern->parse($patt_str, format => "smarts");
     $mol = Chemistry::Mol->parse($mol_str, format => 'smiles');
+    aromatize_mol($mol);
     $patt->options(split " ", $options);
 
     my @matches;

@@ -4,9 +4,10 @@ use ExtUtils::MakeMaker;
 WriteMakefile(
     'NAME'		=> 'Chemistry::File::SMARTS',
     'VERSION_FROM'	=> 'SMARTS.pm', 
-    'PREREQ_PM'		=> {
-        'Chemistry::Mol' => '0.10',
-        'Chemistry::Pattern' => '0.01',
-        'Parse::RecDescent' => '0',
-    }, 
+    'PREREQ_PM'		=> {qw(
+        Chemistry::Mol          0.24
+        Chemistry::Pattern      0.21
+        List::Util              0
+        Test::More              0
+    )}, 
 );
