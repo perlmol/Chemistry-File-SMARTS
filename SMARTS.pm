@@ -2,327 +2,268 @@ package Chemistry::File::SMARTS;
 
 $VERSION = "0.01";
 
-use 5.006001;
+use 5.006;
 use strict;
 use warnings;
 use Chemistry::Pattern;
 use base "Chemistry::File";
-use Parse::RecDescent;
 use Carp;
-use Data::Dumper;
-
-=head1 NAME
-
-Chemistry::SMARTS - SMARTS parser
-
-=head1 SYNOPSYS
-
-
-    #!/usr/bin/perl
-    use Chemistry::File::SMARTS;
-
-    my $smarts = "CC(O)C";
-    my $patt = Chemistry::Pattern->parse($smarts, format => "smarts")
-        or die "invalid SMARTS!\n";
-    
-    # somehow get a molecule into $mol ...
-    $mol = Chemistry::Mol->read("myfile.mol");
-
-    while ($patt->match($mol) ) {
-        my @atoms = $patt->atom_map;
-        print "Matched: (@atoms)\n";
-    }
-
-=head1 DESCRIPTION
-
-This module is used for reading SMARTS patterns, returning Chemistry::Pattern
-objects.
-
-=cut
-
+#use Data::Dumper;
+use List::Util 'sum';
+#use Text::Balanced qw(extract_multiple extract_bracketed);
 
 # Initialization
 Chemistry::Mol->register_format(smarts => __PACKAGE__);
-my $parser = init_parser();
-my $Debug = 0;
+our $DEBUG = 0;
 
 # Chemistry::File interface
 
 sub parse_string {
     my ($self, $s, %options) = @_;
-    my $result;
-    my $patt;
-    if (defined($result = $parser->smiles($s))) {
-        # print "It's a valid SMARTS!\n";
-        print Dumper($result) if $Debug;
-        $patt = compile($result);
-    } 
+    my $patt = parse_smarts($s);
     $patt;
 }
 
-# Private stuff
-
-sub init_parser {
-    my $grammar = <<'END_GRAMMAR';
-        # MAIN STRUCTURE
-        smiles: atom_or_branch chain_or_branch(s?) /\z/ {[$item[1], @{$item[2]}]}
-        atom_or_branch: atomd | branch
-        chain_or_branch: nextatom | branch
-        nextatom: bond_expr atomd {[nextatom => $item[1], $item[2]]}
-
-        branch: "(" chain_or_branch(s) ")" {[branch => $item[2]]}
-
-        # ATOMS
-        atomd: atom bdigit(s?) {[@item]}
-        atom: simple_atom 
-            { [atom_expr => [atom_or_expr => [ atom_and_expr => $item[1]]]] }
-            | complex_atom
-        simple_atom: organic {["", symbol => $item[1]]} 
-            | aromatic {["", symbol => $item[1]]}
-
-        # CHEMICAL ELEMENTS
-        # Order matters! Otherwise P would be found before Pt...
-        element: inorganic | organic   
-        # Cl must be before C and Br before B
-        organic: "Cl" | "Br" | "B" | "C" | "N" | "O" | "S" | "P" | "F" | "I" 
-        inorganic: "Ru" | "Pt" | "H" | "Na"
-        aromatic: "c" | "n" | "o" | "s"
-
-        # ATOMIC EXPRESSIONS
-        complex_atom: "[" atom_expr "]" {$item[2]}
-        atom_expr: atom_or_expr(s /;/) {[$item[0],@{$item[1]}]} 
-        atom_or_expr: atom_and_expr(s /,/) {[$item[0],@{$item[1]}]}
-        atom_and_expr: atom_not_expr(s /&?/) {[$item[0],@{$item[1]}]}
-        atom_not_expr: /!?/ atomic_primitive {[$item[1],@{$item[2]}]}
-        #atom_and_expr: atomic_primitive(s /&?/) {[$item[0],@{$item[1]}]}
-
-        # BOND EXPRESSIONS
-        bond_expr: bond_or_expr(s /;/) {[$item[0],@{$item[1]}]} 
-        bond_or_expr: bond_and_expr(s /,/) {[$item[0],@{$item[1]}]}
-        bond_and_expr: bond_not_expr(s /&?/) {[$item[0],@{$item[1]}]} 
-            | "" {[$item[0], ["", ""] ]}
-        bond_not_expr: /!?/ bond_primitive {[$item[1], $item[2]]} 
-        bond_primitive: "-" | "=" | "#" | ":" | "." | "/" | "\\\\"
-
-        # ATOMIC PRIMITIVES
-        atomic_primitive: hydrogens | isotope | charge 
-            | element { [symbol => $item[1]]} 
-        hydrogens: "H" /\d?/ {[ hcount => $item[2] || 1]}
-        isotope: /\d+/ {[iso => $item[1]]}
-        charge: /((?:\+|-)+)(\d*)/ {
-            my $chg;
-            if(length($1) > 1) {
-                $chg = ($2 eq '') ? substr($1, 0, 1).(length($1)) : undef;
-            } else {
-                $chg = "${1}1" * ($2 ne '' ? $2 : 1);
-            }
-            [charge => $chg];
-        }
-
-        # DIGITS
-        bdigit: bond_expr digit   {[@item]}
-        digit: /(\d)/ | /%(\d\d)/ {$1}
-
-END_GRAMMAR
-
-
-    $Parse::RecDescent::skip = "";
-    my $parser = Parse::RecDescent->new($grammar) or die;
-    $parser;
-}
-
-
-# compiles a parse tree and returns a Chemistry::Pattern object.
-# The tree itself is destroyed!
-sub compile {
-    my ($tree) = @_;
-    my @stack;
-    my @last_atom;
-    my $patt = Chemistry::Pattern->new;
+sub parse_smarts {
+    my ($s) = @_;
     my %digits;
 
-    while (1) {
-        my $tok = shift @$tree;
-        unless ($tok) {
-            last unless @stack;
-            $tree = pop @stack;
-            pop @last_atom;
-            next;
-        }
-        my $type = $tok->[0];
-        print "tok: $type\n" if $Debug;
-
-        if ($type eq 'branch') {
-            push @stack, $tree;
-            $tree = $tok->[1];
-            push @last_atom, $last_atom[-1];
-        } elsif ($type eq 'atomd') {
-            my $new_atom = $patt->new_atom(test_sub => atom_sub($tok->[1]));
-            push @last_atom, $new_atom;
-            for my $digit (@{$tok->[2]}) {
-                do_digit($patt, \%digits, $digit, $new_atom);
+    my @toks = tokenize($s);
+    my $tok = shift(@toks);
+    my $patt = Chemistry::Pattern->new();
+    my @atom_stack;
+    my $current_atom = parse_atom($patt, $tok);
+    while (defined ($tok = shift @toks)) {
+        print "tok: $tok\n" if $DEBUG;
+        if ($tok eq '(') {
+            push @atom_stack, $current_atom;
+        } elsif ($tok eq ')') {
+            $current_atom = pop @atom_stack;
+        } else {  # bond, atom
+            my $next_tok = shift @toks;
+            if ($next_tok =~ /^\d+$/) {  # digit
+                if ($digits{$next_tok}) {  # close ring
+                    parse_bond($patt, $tok, $current_atom, 
+                        $digits{$next_tok});
+                    $digits{$next_tok} = undef;
+                } else { # open ring
+                    $digits{$next_tok} = $current_atom;
+                }
+            } else {
+                my $next_atom = parse_atom($patt, $next_tok);
+                parse_bond($patt, $tok, $current_atom, $next_atom);
+                $current_atom = $next_atom;
             }
-        } elsif ($type eq "nextatom") {
-            print "a bond!\n" if $Debug;
-            #print Dumper($tok);
-            my $old_atom = pop @last_atom;
-            my $new_atom = $patt->new_atom(test_sub => atom_sub($tok->[2][1]));
-            push @last_atom, $new_atom;
-            $patt->new_bond(atoms => [$old_atom, $new_atom], 
-                test_sub => bond_sub($tok->[1]));
-            for my $digit (@{$tok->[2][2]}) {
-                do_digit($patt, \%digits, $digit, $new_atom);
-            }
-        } elsif (ref $tok eq "ARRAY") {
-            die;
-            push @stack, $tree;
-            $tree = $tok;
-        } else {
-            die;
         }
     }
-    #print Dumper ($patt);
     $patt;
 }
 
-sub do_digit {
-    my ($patt, $digits, $dig, $atom) = @_;
-    my ($bnd, $d) = ($dig->[1], $dig->[2]);
+sub parse_atom {
+    my ($patt, $s) = @_;
+    
+    my $expr = 
+        join " and ", map { 
+            join " or ", map { 
+                join ' && ', map {
+                    parse_atomic_primitive($_);
+                } split '&', $_;
+            } split ',', $_;
+        } split ';', $s;
 
-    if ($digits->{$d}) {
-        print "closing ring $d\n" if $Debug;
-        $patt->new_bond(atoms=>[$atom, $digits->{$d}{atom}], 
-            test_sub => bond_sub($bnd));
-        delete $digits->{$d};
-    } else {
-        print "opening ring $d\n" if $Debug;
-        $digits->{$d} = {bond => $bnd, atom => $atom};
-    }
-}
-
-sub atom_sub {
-    my $atom = shift;
-    my $expr = atom_expr($atom);
-
-    eval <<SUB
-    sub {
-        my (\$self, \$atom) = \@_;
-        $expr;
-    }
+    print "atom expr: $expr\n" if $DEBUG;
+    my $sub = eval <<SUB;
+        sub {
+            my (\$patt, \$atom) = \@_;
+            $expr;
+        };
 SUB
+    my $atom = Chemistry::Pattern::Atom->new(test_sub => $sub);
+    $patt->add_atom($atom);
+    $atom;
 }
 
-sub atom_expr {
-    my $atom = shift;
-    die unless $atom->[0] eq 'atom_expr';
+
+# missing primitives: R, r, @, @@
+sub parse_atomic_primitive {
+    local ($_) = @_;
+    my @terms;
+    no warnings 'uninitialized';
+    s/(!?)\*// &&           # wildcard
+        push @terms, "${1}1";
+    s/(!?)D(\d?)// &&       # explicit connections (shouldn't count h)
+        push @terms, "$1(\$atom->bonds == " . (defined $2 ? $2 : 1) . ')';
+    s/(!?)a// &&            # aromatic
+        push @terms, "$1\$atom->aromatic";
+    s/(!?)A// &&            # aliphatic
+        push @terms, "$1(!\$atom->aromatic)";
+    s/(!?)X(\d?)// &&       # total connections (should add implicit H)
+        push @terms, "$1(\$atom->bonds == " . (defined $2 ? $2 : 1) . ')';
+    s/(!?)v(\d?)// &&       # valence
+        push @terms, "$1(sum(map {\$_->order} \$atom->bonds) == " 
+            . (defined $2 ? $2 : 1) . ')';
+    s/(!?)[Hh](\d?)// &&    # H-count
+        push @terms, "$1(sum(map {\$_->symbol eq 'H'} \$atom->neighbors) == " 
+            . (defined $2 ? $2 : 1) . ')';
+    s/(!?)#(\d+)// &&       # atomic number
+        push @terms, "$1(\$atom->Z == $2)";
+    s/(!?)([+-]\d+)// &&    # numerical charge 
+        push @terms, "$1(\$atom->formal_charge == $2)";
+    s/(!?)(\++)// &&        # positive charge
+        push @terms, "$1(\$atom->formal_charge == " . length $2 . ')';
+    s/(!?)(-+)// &&         # negative charge 
+        push @terms, "$1(\$atom->formal_charge == -" . length $2 . ')';
+    s/(!?)(\d+)// &&        # mass
+        push @terms, "$1(\$atom->mass == $2)";
+    s/(!?)([cnosp])// &&    # aromatic symbol
+        push @terms, "$1(\$atom->symbol eq '$2' && \$atom->aromatic)";
+    s/(!?)([A-Z][a-z]?)// &&    # aliphatic symbol
+        push @terms, "$1(\$atom->symbol eq '$2' && ! \$atom->aromatic)";
+    join ' && ', @terms;
+}
+
+sub parse_bond {
+    my ($patt, $s, @atoms) = @_;
+
     my $expr;
-    if (@$atom >= 2) {
-        my @or_exprs = map {atom_or_expr($_)} @{$atom}[1 .. $#$atom];
-        $expr = join(") && (", @or_exprs);
-        $expr = "($expr)";
+    
+    if ($s) {
+        $expr = 
+            join " and ", map { 
+                join " or ", map { 
+                    join ' && ', map {
+                        parse_bond_primitive($_);
+                    } split '&', $_;
+                } split ',', $_;
+            } split ';', $s;
     } else {
-        die;
+        $expr = '($bond->order == 1 || $bond->aromatic)';
     }
-    print "expr: $expr\n" if $Debug;
-    $expr;
-}
 
-sub atom_or_expr {
-    my $term = shift;
-    die unless $term->[0] eq 'atom_or_expr';
-    my $expr;
-    if (@$term >= 2) {
-        my @exprs = map {atom_and_expr($_)} @{$term}[1 .. $#$term];
-        $expr = join " || ", @exprs;
-    } else {
-        die;
-    }
-    $expr;
-}
-
-
-sub atom_and_expr {
-    my $term = shift;
-    die unless $term->[0] eq 'atom_and_expr';
-    my $expr;
-    if (@$term >= 2) {
-        my @exprs = map {atom_primitive_expr($_)} @{$term}[1 .. $#$term];
-        $expr = join " && ", @exprs;
-    } else {
-        die;
-    }
-    $expr;
-}
-
-sub atom_primitive_expr {
-    my $prim = shift;
-
-    my $expr = "\$atom->$prim->[1] eq '$prim->[2]'";
-    $expr = "!($expr)" if $prim->[0];
-    $expr;
-}
-
-sub bond_sub {
-    my $bond = shift;
-    my $expr = bond_expr($bond);
-
-    eval <<SUB
-    sub {
-        my (\$self, \$bond) = \@_;
-        $expr;
-    }
+    print "bond expr: $expr\n" if $DEBUG;
+    my $sub = eval <<SUB;
+        sub {
+            my (\$patt, \$bond) = \@_;
+            $expr;
+        };
 SUB
+    my $bond = Chemistry::Pattern::Bond->new(test_sub => $sub, 
+        atoms => \@atoms);
+    $patt->add_bond($bond);
+    $bond;
 }
 
-sub bond_expr {
-    my $bond = shift;
-    die unless $bond->[0] eq 'bond_expr';
-    my $expr;
-    if (@$bond >= 2) {
-        my @or_exprs = map {bond_or_expr($_)} @{$bond}[1 .. $#$bond];
-        $expr = join(") && (", @or_exprs);
-        $expr = "($expr)";
-    } else {
-        die;
+sub parse_bond_primitive {
+    local ($_) = @_;
+    my @terms;
+    s/(!?)~// &&        # wildcard
+        push @terms, "${1}1";
+    s/(!?)-// &&        # single
+        push @terms, "$1(\$bond->order == 1)";
+    s/(!?)=// &&        # double
+        push @terms, "$1(\$bond->order == 2)";
+    s/(!?)#// &&        # triple
+        push @terms, "$1(\$bond->order == 3)";
+    s/(!?):// &&        # triple
+        push @terms, "$1\$bond->aromatic";
+    join ' && ', @terms;
+}
+
+my %ORGANIC_ELEMS = (
+    Br => 1, Cl => 1, B => 1, C => 1, N => 1, O => 1, P => 1, S => 1, 
+    F => 1, I => 1, s => 1, p => 1, o => 1, n => 1, c => 1, b => 1,
+);
+
+sub tokenize {
+    my ($s) = @_;
+    my $state = 3;
+    my $paren_depth = 0;
+    my $atom;
+    my $digit;
+    my $rec_smart;
+    my @rec_smarts;
+    my $bond = '';
+    my $symbol;
+    my @toks;
+    
+    # 0 expects atom or branch
+    # after atom: atom or bond or branch
+    # after bond: atom or branch or /,;/
+    # token types: atom, bond, (, )
+    my @chars = split '', $s;
+    my $char;
+    while (defined ($char = shift @chars)) {
+        print "char: $char\n" if $DEBUG;
+        if ($state == 0) { # expect atom or branch (not used!)
+            push(@toks,  $char), $state = 2, next if ($char =~ /[()]/);
+            $state = 3, redo;
+        } elsif ($state == 1) { # in complex atom
+            if ($char eq ']') {
+                push @toks, $atom, @rec_smarts;
+                @rec_smarts = ();
+                $state = 4, next;
+            }
+            $atom .= $char;
+            $state = 5 if ($char eq '$'); # recursive smarts
+            next;
+        } elsif ($state == 2) { # expect bond
+            if ($char =~ /[-=:~\\\/#@?,;&]/) {
+                $bond .= $char;
+                next;
+            } else {
+                push @toks, $bond;
+                $bond = '';
+                $state = 3, redo;
+            }
+        } elsif ($state == 3) {  # expect atom
+            $state = 1, $atom = '', next if $char eq '[';
+            if ($char eq '%') {
+                $state = 7, next;
+            }
+            $symbol = $char;
+            push(@toks, $symbol), last unless @chars;
+            $char = shift @chars;
+            if ($ORGANIC_ELEMS{$symbol.$char}) {
+                push @toks, $symbol.$char;
+                $state = 4, next;
+            } else {
+                push @toks, $symbol;
+                $state = 4, redo;
+            }
+        } elsif ($state == 4) {  # expect atom or bond or branch
+            push(@toks, $char), $state = 2, next if ($char =~ /[()]/); # branch
+            $state = 2, redo; # bond
+        } elsif ($state == 5) {  # expect left paren
+            croak "expected (" unless $char eq '(';
+            $rec_smart = '';
+            $paren_depth++, $state = 6, next;
+        } elsif ($state == 6) {  # within recursive smarts
+            $paren_depth++ if $char eq '(';
+            $paren_depth-- if $char eq ')';
+            unless ($paren_depth) {
+                push @rec_smarts, $rec_smart;
+                $state = 1, next;
+            }
+            $rec_smart .= $char;
+        } elsif ($state == 7) {  # double digit
+            $digit = $char . (shift @chars || die "expected second digit");
+            push @toks, $digit;
+            $state = 2;
+        } else {
+            die "shouldn't be here";
+        }
     }
-    print "expr: $expr\n" if $Debug;
-    $expr;
-}
-
-sub bond_or_expr {
-    my $term = shift;
-    die unless $term->[0] eq 'bond_or_expr';
-    my $expr;
-    if (@$term >= 2) {
-        my @exprs = map {bond_and_expr($_)} @{$term}[1 .. $#$term];
-        $expr = join " || ", @exprs;
-    } else {
-        die;
-    }
-    $expr;
+    #print Dumper \@toks if $DEBUG;
+    @toks;
 }
 
 
-sub bond_and_expr {
-    my $term = shift;
-    die unless $term->[0] eq 'bond_and_expr';
-    my $expr;
-    if (@$term >= 2) {
-        my @exprs = map {bond_primitive_expr($_)} @{$term}[1 .. $#$term];
-        $expr = join " && ", @exprs;
-    } else {
-        die;
-    }
-    $expr;
-}
+package Chemistry::File::SMARTS::simple_atom;
 
-sub bond_primitive_expr {
-    my $prim = shift;
-
-    $prim =~ s/\\/\\\\/;
-    my $expr = "\$bond->type eq '$prim->[1]'";
-    $expr = "!($expr)" if $prim->[0];
-    $expr;
+sub parse {
+    my ($s) = shift;
+    # should do some validation here...
+    Chemistry::Pattern::Atom->new(symbol => $s);
 }
 
 1;

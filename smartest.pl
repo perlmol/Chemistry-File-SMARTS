@@ -4,10 +4,14 @@ use blib;
 use strict;
 use warnings;
 use Chemistry::File::SMARTS;
+use Chemistry::File::SMILES;
 
-our $Debug ||= 0;
+our $debug ||= 0;
 our $permute ||= 0;
 our $overlap ||= 1;
+
+$Chemistry::File::SMARTS::DEBUG = $debug;
+$Chemistry::Pattern::Debug = $debug;
 
 my $smarts = $ARGV[0] || 'C(OC)C';
 my %options = (permute => $permute, overlap => $overlap);
@@ -23,12 +27,10 @@ $patt->options(%options);
 #print "pattern compiled\n";
 
 # Test matching on a smiles molecule
-use Chemistry::Smiles;
-my $mol_parser = new Chemistry::Smiles();
-my $mol;
 my $smiles = $ARGV[1] || "COCC";
 print "Mol: $smiles\n";
-$mol_parser->parse($smiles, $mol = Chemistry::Mol->new);
+my $mol = Chemistry::Mol->parse($smiles, format => 'smiles');
+
 my @ret;
 while ($patt->match($mol) ) {
     @ret = $patt->atom_map;

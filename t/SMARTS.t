@@ -1,5 +1,5 @@
 use Test::More;
-use Chemistry::Smiles;
+use Chemistry::File::SMILES;
 use Chemistry::Mol;
 use Chemistry::Pattern;
 use strict;
@@ -14,8 +14,6 @@ BEGIN {
 };
 
 
-my $mol_parser = new Chemistry::Smiles();
-
 for my $file (@files) {
     open F, $file or die "couldn't open $file\n";   
     my ($patt_str, $options, $mol_str, @expected_matches) = map { /: ([^\n\r]*)/g } <F>;
@@ -23,7 +21,7 @@ for my $file (@files) {
     my ($mol, $patt);
     Chemistry::Atom->reset_id;
     $patt = Chemistry::Pattern->parse($patt_str, format => "smarts");
-    $mol_parser->parse($mol_str, $mol = Chemistry::Mol->new);
+    $mol = Chemistry::Mol->parse($mol_str, format => 'smiles');
     $patt->options(split " ", $options);
 
     my @matches;
