@@ -1,27 +1,34 @@
-#!/home/ivan/bin/perl
+#!/home/ivan/bin/perl -s
 
 use blib;
 use strict;
 use warnings;
 use Chemistry::File::SMARTS;
 
-#Parse::RecDescent->Precompile($grammar, "SmilesGrammar");
-#use SmilesGrammar;
-#my $parser = SmilesGrammar->new() or die;
+our $Debug ||= 0;
+our $permute ||= 0;
+our $overlap ||= 1;
 
-my $s = $ARGV[0] || 'C(OC)C';
+my $smarts = $ARGV[0] || 'C(OC)C';
+my %options = (permute => $permute, overlap => $overlap);
 
-print "$s\n";
+#print "$smarts\n";
 
-my $patt = Chemistry::Pattern->parse($s, format => "smarts");
+print "Pattern: $smarts\n";
+print "Options: ", join(" ", %options), "\n";
+
+my $patt = Chemistry::Pattern->parse($smarts, format => "smarts");
 die "Invalid SMARTS" unless $patt;
-print "pattern compiled\n";
+$patt->options(%options);
+#print "pattern compiled\n";
 
 # Test matching on a smiles molecule
 use Chemistry::Smiles;
 my $mol_parser = new Chemistry::Smiles();
 my $mol;
-$mol_parser->parse($ARGV[1] || "COCC", $mol = Chemistry::Mol->new);
+my $smiles = $ARGV[1] || "COCC";
+print "Mol: $smiles\n";
+$mol_parser->parse($smiles, $mol = Chemistry::Mol->new);
 my @ret;
 while ($patt->match($mol) ) {
     @ret = $patt->atom_map;

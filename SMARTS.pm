@@ -9,7 +9,7 @@ use Chemistry::Pattern;
 use base "Chemistry::File";
 use Parse::RecDescent;
 use Carp;
-#use Data::Dumper;
+use Data::Dumper;
 
 =head1 NAME
 
@@ -54,7 +54,7 @@ sub parse_string {
     my $patt;
     if (defined($result = $parser->smiles($s))) {
         # print "It's a valid SMARTS!\n";
-        #print Dumper($result);
+        print Dumper($result) if $Debug;
         $patt = compile($result);
     } 
     $patt;
@@ -72,20 +72,13 @@ sub init_parser {
 
         branch: "(" chain_or_branch(s) ")" {[branch => $item[2]]}
 
-        # BOND EXPRESSIONS
-        bond_expr: bond_or_expr(s /;/) {[$item[0],@{$item[1]}]} 
-        bond_or_expr: bond_and_expr(s /,/) {[$item[0],@{$item[1]}]}
-        bond_and_expr: bond_primitive(s /&?/) {[$item[0],@{$item[1]}]} 
-            | "" {[$item[0], ""]}
-        bond_primitive: "-" | "=" | "#" | ":" | "." | "/" | "\\\\"
-
         # ATOMS
         atomd: atom bdigit(s?) {[@item]}
         atom: simple_atom 
             { [atom_expr => [atom_or_expr => [ atom_and_expr => $item[1]]]] }
             | complex_atom
-        simple_atom: organic {[symbol => $item[1]]} 
-            | aromatic {[symbol => $item[1]]}
+        simple_atom: organic {["", symbol => $item[1]]} 
+            | aromatic {["", symbol => $item[1]]}
 
         # CHEMICAL ELEMENTS
         # Order matters! Otherwise P would be found before Pt...
@@ -99,7 +92,17 @@ sub init_parser {
         complex_atom: "[" atom_expr "]" {$item[2]}
         atom_expr: atom_or_expr(s /;/) {[$item[0],@{$item[1]}]} 
         atom_or_expr: atom_and_expr(s /,/) {[$item[0],@{$item[1]}]}
-        atom_and_expr: atomic_primitive(s /&?/) {[$item[0],@{$item[1]}]}
+        atom_and_expr: atom_not_expr(s /&?/) {[$item[0],@{$item[1]}]}
+        atom_not_expr: /!?/ atomic_primitive {[$item[1],@{$item[2]}]}
+        #atom_and_expr: atomic_primitive(s /&?/) {[$item[0],@{$item[1]}]}
+
+        # BOND EXPRESSIONS
+        bond_expr: bond_or_expr(s /;/) {[$item[0],@{$item[1]}]} 
+        bond_or_expr: bond_and_expr(s /,/) {[$item[0],@{$item[1]}]}
+        bond_and_expr: bond_not_expr(s /&?/) {[$item[0],@{$item[1]}]} 
+            | "" {[$item[0], ["", ""] ]}
+        bond_not_expr: /!?/ bond_primitive {[$item[1], $item[2]]} 
+        bond_primitive: "-" | "=" | "#" | ":" | "." | "/" | "\\\\"
 
         # ATOMIC PRIMITIVES
         atomic_primitive: hydrogens | isotope | charge 
@@ -254,7 +257,8 @@ sub atom_and_expr {
 sub atom_primitive_expr {
     my $prim = shift;
 
-    my $expr = "\$atom->$prim->[0] eq '$prim->[1]'";
+    my $expr = "\$atom->$prim->[1] eq '$prim->[2]'";
+    $expr = "!($expr)" if $prim->[0];
     $expr;
 }
 
@@ -316,7 +320,8 @@ sub bond_primitive_expr {
     my $prim = shift;
 
     $prim =~ s/\\/\\\\/;
-    my $expr = "\$bond->type eq '$prim'";
+    my $expr = "\$bond->type eq '$prim->[1]'";
+    $expr = "!($expr)" if $prim->[0];
     $expr;
 }
 

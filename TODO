@@ -1,0 +1,22 @@
+SMARTS syntax that hasn't been added yet
+
+Atomic primitives:
+* wildcard
+a
+A
+D
+h
+R
+r
+v
+X
+#n
+@
+$()
+
+Bonds:
+/?
+\?
+~
+@
+
