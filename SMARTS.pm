@@ -1,6 +1,6 @@
 package Chemistry::File::SMARTS;
 
-$VERSION = "0.11";
+$VERSION = "0.20";
 # $Id$
 
 use 5.006;
@@ -9,8 +9,8 @@ use warnings;
 use Chemistry::Pattern;
 use base "Chemistry::File";
 use Carp;
-use Data::Dumper;
-use List::Util 'sum';
+#use Data::Dumper;
+use List::Util 'sum', 'first';
 
 =head1 NAME
 
@@ -35,7 +35,7 @@ Chemistry::File::SMARTS - SMARTS chemical substructure pattern linear notation p
         print "pattern matches atoms: ", $patt->atom_map, "\n"
     }
 
-    # NOTE: if the SMARTS pattern relies on aromaticity 
+    # NOTE: if the SMARTS pattern relies on aromaticity or ring
     # properties, you have to make sure that the target 
     # molecule is "aromatized" first:
     my $smarts = 'c:a';
@@ -48,9 +48,10 @@ Chemistry::File::SMARTS - SMARTS chemical substructure pattern linear notation p
 
 =head1 DESCRIPTION
 
-This module parse a SMARTS string, generating a L<Chemistry::Pattern> object.
-It is a file I/O driver for the PerlMol toolkit; it's not called directly but
-by means of the Chemistry::Pattern->parse class method.
+This module parse a SMARTS (SMiles ARbitrary Target Specification) string,
+generating a L<Chemistry::Pattern> object.  It is a file I/O driver for the
+PerlMol toolkit; it's not called directly but by means of the
+Chemistry::Pattern->parse class method.
 
 For a detailed description of the SMARTS language, see
 L<http://www.daylight.com/dayhtml/doc/theory/theory.smarts.html>. Note that
@@ -84,6 +85,7 @@ sub parse_smarts {
     print "tok: $tok\n" if $DEBUG;
     my $mol_class = $opts->{mol_class} || "Chemistry::Pattern";
     my $patt = $mol_class->new();
+    $patt->options($opts->{pattern_options}||{});
     my @atom_stack;
     my $current_atom = parse_atom($patt, $tok, $toks);
     while (defined ($tok = shift @$toks)) {
@@ -113,16 +115,28 @@ sub parse_smarts {
 }
 
 sub parse_atom {
-    my ($patt, $s) = @_;
+    my ($patt, $s, $toks) = @_;
     
+    my $n_rec = 0;
     my $expr = 
         join " and ", map { 
             join " || ", map { 
                 join ' && ', map {
-                    parse_atomic_primitive($_);
+                    parse_atomic_primitive($_, \$n_rec);
                 } split '&', $_;
             } split ',', $_;
         } split ';', $s;
+
+    
+    my @recs;
+    for (1 .. $n_rec) {
+        my $rec_smarts = shift @$toks;
+        my $rec = Chemistry::Pattern->parse($rec_smarts, 
+            pattern_options => {overlap=>0, permute=>0},
+            format => 'smarts',
+        );
+        push @recs, $rec;
+    }
 
     print "atom expr: $expr\n" if $DEBUG;
     my $sub = eval <<SUB;
@@ -138,9 +152,10 @@ SUB
 }
 
 
-# missing primitives: R, r, @, @@
+# missing primitives: @, @@
 sub parse_atomic_primitive {
-    local ($_) = @_;
+    my ($s, $n_rec) = @_;
+    local $_ = $s;
     my @terms;
     no warnings 'uninitialized';
 
@@ -174,6 +189,14 @@ sub parse_atomic_primitive {
     s/(!?)h(\d?)// &&    # implicit H-count
         push @terms, "$1(\$atom->hydrogens == " . (length $2 ? $2 : 1) . ')';
 
+    s/(!?)R(\d?)// &&    # number of rings
+        push @terms, "$1(\@{\$atom->attr('ring/rings')||[]} " 
+            . (length $2 ? "== $2" : "") . ')';
+    
+    s/(!?)r(\d?)// &&    # ring size
+        push @terms, "$1(first { " . (length $2 ? "\$_->atoms == $2" : "1") 
+            ." } \@{\$atom->attr('ring/rings')||[]} )";
+    
     s/(!?)#(\d+)// &&       # atomic number
         push @terms, "$1(\$atom->Z == $2)";
 
@@ -195,8 +218,10 @@ sub parse_atomic_primitive {
     s/(!?)([A-Z][a-z]?)// &&    # aliphatic symbol
         push @terms, "$1(\$atom->symbol eq '$2' && ! \$atom->aromatic)";
 
-    #s/(!?)\$// &&    #  recursive SMARTS
-        #push @terms, qq{$1(\$patt->attr("smarts/rec0")->match(\$atom))};
+    while (s/(!?)\$//) {    #  recursive SMARTS
+        push @terms, qq{$1(\$recs[$$n_rec]->match(\$atom->parent,atom=>\$atom))};
+        $$n_rec++;
+    }
 
     join ' && ', @terms;
 }
@@ -254,6 +279,9 @@ sub parse_bond_primitive {
     s/(!?):// &&        # triple
         push @terms, "$1\$bond->aromatic";
 
+    s/(!?)\@// &&       # ring bond
+        push @terms, "$1(\@{\$bond->attr('ring/rings')||[]} )";
+    
     join ' && ', @terms;
 }
 
@@ -326,7 +354,7 @@ sub tokenize {
             $rec_smart = '';
             $paren_depth++, $state = 6, next;
         } elsif ($state == 6) {  # within recursive smarts
-            croak "Recursive SMARTS not implemented yet\n";
+            #croak "Recursive SMARTS not implemented yet\n";
             $paren_depth++ if $char eq '(';
             $paren_depth-- if $char eq ')';
             unless ($paren_depth) {
@@ -342,7 +370,7 @@ sub tokenize {
             die "shouldn't be here";
         }
     }
-    print Dumper \@toks if $DEBUG;
+    #print Dumper \@toks if $DEBUG;
     \@toks;
 }
 
@@ -355,20 +383,29 @@ The following features are not implemented yet:
 
 =over
 
-=item ring membership: R, r
-
 =item chirality: @, @@
 
-=item recursive SMARTS: $
+=item component-level gruouping
+
+That is, the difference between these three cases:
+
+    (SMARTS)
+    (SMARTS).(SMARTS)
+    (SMARTS).SMARTS
 
 =back
 
-The parser is very lenient, but if you give it something that's not quite
-reasonable it will interpret it in a strange way without warning.
+The so-called parser is very lenient, so if you give it something that's not
+quite reasonable it will ignore it or interpret it in a strange way without
+warning.
+
+As shown in the synopsis, you have to make sure that the molecule is
+"aromatized" if you want to apply to it a pattern that relies on aromaticity
+or ring properties.
 
 =head1 VERSION
 
-0.11
+0.20
 
 =head1 SEE ALSO
 

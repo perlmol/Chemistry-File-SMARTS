@@ -1,5 +1,9 @@
 Revision history for Perl extension Chemistry::File::SMARTS.
 
+0.20  Aug 6 2004
+    - Added support for recursive SMARTS, R and r atom primitives, and @ bond
+      primitive.
+
 0.11  Jun 31 2004
     - Fixed tokenizing bug for consecutive branches.
 
