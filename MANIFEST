@@ -1,7 +1,5 @@
 Changes
 MANIFEST			This list of files
-MANIFEST.SKIP
-MANIFEST.bak
 Makefile.PL
 README
 SMARTS.pm
