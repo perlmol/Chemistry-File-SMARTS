@@ -1,6 +1,6 @@
 package Chemistry::File::SMARTS;
 
-$VERSION = "0.20";
+$VERSION = "0.21";
 # $Id$
 
 use 5.006;
@@ -162,6 +162,16 @@ sub parse_atomic_primitive {
     s/^(!?)H// &&           # Hydrogen atom
         push @terms, "$1(\$atom->symbol eq 'H')";
 
+    s/(!?)
+        (Zr|Zn|Yb|Y|Xe|W|V|U|Tm|Tl|Ti|Th|
+        Te|Tc|Tb|Ta|Sr|Sn|Sm|Si|Sg|Se|Sc|Sb|S|Ru|Rn|Rh|Rf|Re|Rb|Ra|
+        Pu|Pt|Pr|Po|Pm|Pd|Pb|Pa|P|Os|O|Np|No|Ni|Ne|Nd|Nb|Na|N|Mt|Mt|
+        Mo|Mn|Mg|Md|Lu|Lr|Li|La|Kr|K|Ir|In|I|Hs|Hs|Ho|Hg|Hf|He|Ge|
+        Gd|Ga|Fr|Fm|Fe|F|Eu|Es|Er|Dy|Ds|Db|Cu|Cs|Cr|Co|Cm|Cl|Cf|Ce|
+        Cd|Ca|C|Br|Bk|Bi|Bh|Be|Ba|B|Au|At|As|Ar|Am|Al|Ag|Ac)
+    //x # Order is reverse alphabetical to ensure longest match
+        && push @terms, "$1(\$atom->symbol eq '$2' && ! \$atom->aromatic)";
+
     s/(!?)\*// &&           # wildcard
         push @terms, "${1}1";
 
@@ -215,8 +225,8 @@ sub parse_atomic_primitive {
     s/(!?)([cnosp])// &&    # aromatic symbol
         push @terms, "$1(\$atom->symbol eq '@{[uc $2]}' && \$atom->aromatic)";
 
-    s/(!?)([A-Z][a-z]?)// &&    # aliphatic symbol
-        push @terms, "$1(\$atom->symbol eq '$2' && ! \$atom->aromatic)";
+    #s/(!?)([A-Z][a-z]?)// &&    # aliphatic symbol
+        #push @terms, "$1(\$atom->symbol eq '$2' && ! \$atom->aromatic)";
 
     while (s/(!?)\$//) {    #  recursive SMARTS
         push @terms, qq{$1(\$recs[$$n_rec]->match(\$atom->parent,atom=>\$atom))};
@@ -405,7 +415,7 @@ or ring properties.
 
 =head1 VERSION
 
-0.20
+0.21
 
 =head1 SEE ALSO
 
@@ -413,7 +423,7 @@ L<Chemistry::Pattern>, L<Chemistry::Mol>, L<Chemistry::File>,
 L<Chemistry::File::SMILES>.
 
 For more information about SMARTS, see the SMARTS Theory Manual at
-http://www.daylight.com/dayhtml/doc/theory/theory.smarts.html
+L<http://www.daylight.com/dayhtml/doc/theory/theory.smarts.html>
 
 =head1 AUTHOR
 
