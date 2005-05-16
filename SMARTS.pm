@@ -1,6 +1,6 @@
 package Chemistry::File::SMARTS;
 
-$VERSION = "0.21";
+$VERSION = "0.22";
 # $Id$
 
 use 5.006;
@@ -46,6 +46,11 @@ Chemistry::File::SMARTS - SMARTS chemical substructure pattern linear notation p
         print "pattern matches atoms: ", $patt->atom_map, "\n"
     }
 
+    # Note that "atom mapping numbers" end up as $atom->name
+    my $patt = Chemistry::Pattern->parse("[C:7][C:8]", format => 'smarts');
+    print $patt->atoms(1)->name;    # prints 7
+
+
 =head1 DESCRIPTION
 
 This module parse a SMARTS (SMiles ARbitrary Target Specification) string,
@@ -70,6 +75,7 @@ our $DEBUG = 0;
 sub parse_string {
     my ($self, $s, %opts) = @_;
     my $patt = parse_smarts($s, \%opts);
+    $patt->name($s);
     $patt;
 }
 
@@ -118,6 +124,11 @@ sub parse_atom {
     my ($patt, $s, $toks) = @_;
     
     my $n_rec = 0;
+    my $name;
+
+    if ($s =~ s/:(\d+)$//) {
+        $name = $1;
+    }
     my $expr = 
         join " and ", map { 
             join " || ", map { 
@@ -146,7 +157,10 @@ sub parse_atom {
             $expr;
         };
 SUB
-    my $atom = $patt->atom_class->new(test_sub => $sub);
+    my $atom = $patt->atom_class->new(
+        test_sub => $sub,
+        name => $name,
+    );
     $patt->add_atom($atom);
     $atom;
 }
@@ -415,7 +429,7 @@ or ring properties.
 
 =head1 VERSION
 
-0.21
+0.22
 
 =head1 SEE ALSO
 
@@ -431,7 +445,7 @@ Ivan Tubert-Brohman E<lt>itub@cpan.orgE<gt>
 
 =head1 COPYRIGHT
 
-Copyright (c) 2004 Ivan Tubert-Brohman. All rights reserved. This program is
+Copyright (c) 2005 Ivan Tubert-Brohman. All rights reserved. This program is
 free software; you can redistribute it and/or modify it under the same terms as
 Perl itself.
 

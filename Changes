@@ -1,5 +1,9 @@
 Revision history for Perl extension Chemistry::File::SMARTS.
 
+0.22  May 26 2005
+    - Added the original SMARTS string as the $patt->name property.
+    - Added support for atom mapping numbers
+
 0.21  Aug 13 2004
     - Fixed parsing bug where Br was interpreted as "boron in a ring", among
       other two-letter symbols.

@@ -1,4 +1,4 @@
-Chemistry::File::SMARTS version 0.21
+Chemistry::File::SMARTS version 0.22
 ====================================
 
 This object-oriented module is used for reading SMARTS patterns, returning
@@ -7,9 +7,9 @@ Chemistry::Pattern objects.
 For more information about SMARTS, see the SMARTS Theory Manual at
 http://www.daylight.com/dayhtml/doc/theory/theory.smarts.html
 
-CHANGES SINCE VERSION 0.20
-    - Fixed parsing bug where Br was interpreted as "boron in a ring", among
-      other two-letter symbols.
+CHANGES SINCE VERSION 0.21
+    - Added the original SMARTS string as the $patt->name property.
+    - Added support for atom mapping numbers
 
 INSTALLATION
 
@@ -32,7 +32,7 @@ This module requires these other modules and libraries:
 
 COPYRIGHT AND LICENSE
 
-Copyright (C) 2004 Ivan Tubert-Brohman <itub@cpan.org>
+Copyright (C) 2005 Ivan Tubert-Brohman <itub@cpan.org>
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself. 

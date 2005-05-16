@@ -11,7 +11,7 @@ BEGIN {
         use Chemistry::File::SMILES 0.40;
     };
     @files = glob "t/pats/*.pat" unless $@;
-    plan tests => 1 + @files;
+    plan tests => 1 + @files * 2;
     use_ok('Chemistry::File::SMARTS');
 };
 
@@ -23,6 +23,7 @@ for my $file (@files) {
     my ($mol, $patt);
     Chemistry::Atom->reset_id;
     $patt = Chemistry::Pattern->parse($patt_str, format => "smarts");
+    is ($patt->name, $patt_str, "\$patt->name($patt_str)");
     $mol = Chemistry::Mol->parse($mol_str, format => 'smiles');
     aromatize_mol($mol);
     $patt->options(split " ", $options);
