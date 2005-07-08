@@ -27,7 +27,7 @@ Chemistry::File::SMARTS - SMARTS chemical substructure pattern linear notation p
 
     # parse a SMARTS string and compile it into a
     # Chemistry::Pattern object
-    my $patt = Chemistry::Pattern->parse("$smarts", format => 'smarts');
+    my $patt = Chemistry::Pattern->parse($smarts, format => 'smarts');
 
     # find matches of the pattern in a Chemistry::Mol object $mol
     my $mol = Chemistry::Mol->read("myfile.mol");
@@ -39,7 +39,7 @@ Chemistry::File::SMARTS - SMARTS chemical substructure pattern linear notation p
     # properties, you have to make sure that the target 
     # molecule is "aromatized" first:
     my $smarts = 'c:a';
-    my $patt = Chemistry::Pattern->parse("$smarts", format => 'smarts');
+    my $patt = Chemistry::Pattern->parse($smarts, format => 'smarts');
     use Chemistry::Ring 'aromatize_mol';
     aromatize_mol($mol);  # <--- AROMATIZE!!!
     while ($patt->match($mol)) {
@@ -239,11 +239,17 @@ sub parse_atomic_primitive {
     s/(!?)([cnosp])// &&    # aromatic symbol
         push @terms, "$1(\$atom->symbol eq '@{[uc $2]}' && \$atom->aromatic)";
 
-    #s/(!?)([A-Z][a-z]?)// &&    # aliphatic symbol
-        #push @terms, "$1(\$atom->symbol eq '$2' && ! \$atom->aromatic)";
-
     while (s/(!?)\$//) {    #  recursive SMARTS
-        push @terms, qq{$1(\$recs[$$n_rec]->match(\$atom->parent,atom=>\$atom))};
+        push @terms, 
+            qq{
+                $1 (
+                    \$recs[$$n_rec]->match(
+                        \$atom->parent, 
+                        atom=>\$atom, 
+                        reset => 1,
+                    )
+                )
+            };
         $$n_rec++;
     }
 
